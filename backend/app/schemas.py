@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -120,6 +120,8 @@ class BotIn(BaseModel):
     sandbox_id: str | None = None
     system_prompt: str | None = None
     routines_md: str | None = None
+    # MCP tool servers; see Bot.mcp_servers for the config schema.
+    mcp_servers: list[dict[str, Any]] | None = None
 
 
 class BotPatch(BaseModel):
@@ -130,6 +132,7 @@ class BotPatch(BaseModel):
     system_prompt: str | None = None
     routines_md: str | None = None
     status: Literal["active", "archived"] | None = None
+    mcp_servers: list[dict[str, Any]] | None = None
 
 
 class BotOut(BaseModel):
@@ -142,6 +145,7 @@ class BotOut(BaseModel):
     routines_md: str
     parent_bot_id: str | None
     status: str
+    mcp_servers: list[dict[str, Any]] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

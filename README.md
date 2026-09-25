@@ -15,12 +15,25 @@ Web, desktop, and mobile clients all talk to the same backend over one REST + SS
 
 ## Quickstart
 
-Requirements: Docker + Docker Compose.
+Requirements: Docker Engine, Docker Compose plugin, curl, openssl.
+
+```bash
+./install.sh
+```
+
+The installer checks prerequisites, creates `.env` from `.env.example`
+(generating a random `JWT_SECRET`), then builds and starts the stack with
+`docker compose up -d --build`.
+
+<details>
+<summary>Manual install (alternative)</summary>
 
 ```bash
 cp .env.example .env        # then set JWT_SECRET to a long random value
-docker compose up --build
+docker compose up -d --build
 ```
+
+</details>
 
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Health: http://localhost:8000/api/health

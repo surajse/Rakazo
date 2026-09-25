@@ -103,6 +103,11 @@ class Bot(Base):
     )
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     routines_md: Mapped[str] = mapped_column(Text, default="")
+    # MCP tool servers for this bot: list of
+    # {"name": str, "transport": "stdio"|"http",
+    #  "command": str, "args": [str], "env": {str: str},   # stdio
+    #  "url": str, "headers": {str: str}}                  # http
+    mcp_servers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     parent_bot_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("bots.id", ondelete="SET NULL"), nullable=True
     )

@@ -7,7 +7,9 @@ agent run and destroyed afterwards.
 Built-in kinds:
   - local_docker: real Docker containers on the host (via docker-py). The API
     container needs /var/run/docker.sock mounted (see docker-compose.yml).
-  - e2b / daytona / modal: stubs with a config schema and a clear
+  - e2b: real cloud sandboxes via the E2B SDK (needs E2B_API_KEY or
+    api_key in the provider config).
+  - daytona / modal: stubs with a config schema and a clear
     "not configured" error so they can be plugged in later. See README for how
     to add a provider.
 """
@@ -305,6 +307,157 @@ class LocalDockerProvider(SandboxProvider):
         return LocalDockerSession(container, client)
 
 
+# ------------------------------------------------------------------ e2b
+class E2BSession(SandboxSession):
+    """SandboxSession backed by a real E2B cloud sandbox.
+
+    The e2b SDK is synchronous, so every SDK call runs in a worker thread.
+    """
+
+    def __init__(self, sandbox: Any):
+        self._sandbox = sandbox
+
+    async def shell_run(self, command: str, timeout: int = 120) -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(
+                self._sandbox.commands.run, command, timeout=timeout
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxError(f"e2b shell_run failed: {exc}") from exc
+        return {
+            "exit_code": result.exit_code,
+            "stdout": (result.stdout or "")[-20000:],
+            "stderr": (result.stderr or "")[-20000:],
+        }
+
+    async def file_read(self, path: str) -> dict[str, Any]:
+        try:
+            content = await asyncio.to_thread(self._sandbox.files.read, path)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "read failed"}
+        return {"path": path, "content": str(content)[:100000]}
+
+    async def file_write(self, path: str, content: str) -> dict[str, Any]:
+        try:
+            # files.write creates parent dirs automatically.
+            await asyncio.to_thread(self._sandbox.files.write, path, content)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "write failed"}
+        return {"path": path, "bytes_written": len(content.encode("utf-8"))}
+
+    async def file_list(self, path: str = "/workspace") -> dict[str, Any]:
+        try:
+            entries = await asyncio.to_thread(self._sandbox.files.list, path)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "list failed"}
+        out = []
+        for entry in entries or []:
+            ftype = getattr(entry.type, "value", None)
+            out.append(
+                {
+                    "name": entry.name,
+                    "type": "dir" if ftype == "dir" else "file",
+                    "size": getattr(entry, "size", None),
+                }
+            )
+        return {"path": path, "entries": out}
+
+    async def http_fetch(self, url: str, timeout: int = 30) -> dict[str, Any]:
+        script = (
+            "import json, urllib.request;"
+            f"req = urllib.request.Request({url!r}, headers={{'User-Agent': 'Rakazo/1.0'}});"
+            f"resp = urllib.request.urlopen(req, timeout={int(timeout)});"
+            "body = resp.read(60000).decode('utf-8', errors='replace');"
+            "print(json.dumps({'status': resp.status, 'body': body}))"
+        )
+        result = await self.shell_run(f"python3 -c {sh_quote(script)}", timeout=timeout + 10)
+        if result["exit_code"] != 0:
+            err = (result["stderr"] or result["stdout"]).strip()
+            return {"url": url, "error": err[-2000:] or "fetch failed"}
+        try:
+            data = json.loads(result["stdout"])
+        except json.JSONDecodeError:
+            return {"url": url, "error": "could not parse response"}
+        data["url"] = url
+        return data
+
+    async def browser_snapshot(self, url: str) -> dict[str, Any]:
+        """Best-effort snapshot: fetch the page and extract readable text.
+
+        This is NOT a real browser render (no JS execution) — same limitation
+        as the local_docker provider.
+        """
+        fetched = await self.http_fetch(url)
+        if "error" in fetched:
+            return {"url": url, "error": fetched["error"]}
+        text = _html_to_text(fetched.get("body", ""))
+        title = _extract_title(fetched.get("body", ""))
+        return {"url": url, "title": title, "text": text[:30000]}
+
+    async def destroy(self) -> None:
+        def _kill() -> None:
+            try:
+                self._sandbox.kill()
+            except Exception:  # noqa: BLE001
+                pass  # already gone or unreachable; nothing to do
+
+        await asyncio.to_thread(_kill)
+
+
+class E2BProvider(SandboxProvider):
+    kind = "e2b"
+    name = "E2B"
+    description = (
+        "Cloud sandboxes via E2B (needs E2B_API_KEY env var or api_key in config)."
+    )
+    env_var = "E2B_API_KEY"
+    setup_hint = "Set the E2B_API_KEY env var or pass api_key in the provider config."
+
+    def config_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "api_key": {"type": "string", "description": "E2B API key (or E2B_API_KEY env)."},
+                "template": {"type": "string", "description": "E2B template ID."},
+                "timeout": {"type": "integer", "default": 300},
+            },
+        }
+
+    def _api_key(self, config: dict[str, Any] | None) -> str | None:
+        return (config or {}).get("api_key") or os.environ.get("E2B_API_KEY")
+
+    def is_configured(self) -> bool:
+        try:
+            import e2b  # noqa: F401
+        except ImportError:
+            return False
+        return bool(self._api_key(None))
+
+    async def create_session(self, config: dict[str, Any]) -> SandboxSession:
+        try:
+            from e2b import Sandbox
+        except ImportError as exc:
+            raise SandboxNotConfigured(
+                "The 'e2b' provider needs the e2b package (pip install e2b). "
+                "See README ('Adding a sandbox provider')."
+            ) from exc
+        api_key = self._api_key(config)
+        if not api_key:
+            raise SandboxNotConfigured(
+                "E2B API key missing: set the E2B_API_KEY env var or pass "
+                "'api_key' in the provider config."
+            )
+        template = (config or {}).get("template")
+        timeout = (config or {}).get("timeout") or 300
+        try:
+            sandbox = await asyncio.to_thread(
+                Sandbox.create, template=template, timeout=timeout, api_key=api_key
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxNotConfigured(f"e2b sandbox creation failed: {exc}") from exc
+        return E2BSession(sandbox)
+
+
 # ------------------------------------------------- stubs for future providers
 class _StubProvider(SandboxProvider):
     env_var: str = ""
@@ -318,24 +471,6 @@ class _StubProvider(SandboxProvider):
             f"The '{self.kind}' sandbox provider is not implemented in this build. "
             f"{self.setup_hint} See README ('Adding a sandbox provider') to plug it in."
         )
-
-
-class E2BProvider(_StubProvider):
-    kind = "e2b"
-    name = "E2B"
-    description = "Cloud sandboxes via E2B (stub — plug in your E2B_API_KEY)."
-    env_var = "E2B_API_KEY"
-    setup_hint = "Set E2B_API_KEY and implement E2BProvider.create_session()."
-
-    def config_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "api_key": {"type": "string", "description": "E2B API key (or E2B_API_KEY env)."},
-                "template": {"type": "string", "description": "E2B template ID."},
-                "timeout": {"type": "integer", "default": 300},
-            },
-        }
 
 
 class DaytonaProvider(_StubProvider):

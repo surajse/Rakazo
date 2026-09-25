@@ -77,6 +77,7 @@ async def create_bot(
         sandbox_id=data.sandbox_id,
         system_prompt=data.system_prompt if data.system_prompt is not None else tpl_system,
         routines_md=data.routines_md if data.routines_md is not None else tpl_routines,
+        mcp_servers=data.mcp_servers,
     )
     db.add(bot)
     await db.flush()
@@ -116,6 +117,8 @@ async def update_bot(
         value = getattr(data, field)
         if value is not None:
             setattr(bot, field, value)
+    if data.mcp_servers is not None:
+        bot.mcp_servers = data.mcp_servers
     await log_audit(db, user.id, bot.id, "bot.updated", {"fields": data.model_dump(exclude_unset=True).keys().__str__()})
     await db.commit()
     return bot

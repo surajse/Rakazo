@@ -8,6 +8,8 @@ API. Token/tool events stream over SSE through the per-run event bus.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import re
 import shlex
@@ -32,11 +34,14 @@ from app.models import (
     SeenHost,
     Thread,
 )
-from app.services import model_clients, runs, sandbox as sandbox_mod
+from app.services import mcp as mcp_mod, model_clients, runs, sandbox as sandbox_mod
 from app.services.audit import log_audit
 from app.services.model_clients import ProviderConfig
 from app.services.sandbox import SandboxError, SandboxSession
 from app.security import decrypt_secret
+
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------- tool schemas
@@ -190,6 +195,12 @@ class RunContext:
     sandbox_session: SandboxSession
     depth: int = 0
     memory: dict[str, str] = field(default_factory=dict)
+    # MCP tool sources connected at run start.
+    mcp_clients: dict[str, mcp_mod.MCPClient] = field(default_factory=dict)
+    # namespaced tool name ("mcp_<server>_<tool>") -> MCPToolRef
+    mcp_tool_map: dict[str, mcp_mod.MCPToolRef] = field(default_factory=dict)
+    # Function-calling tool defs for the MCP tools (appended to AGENT_TOOLS).
+    mcp_tool_defs: list[dict] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------ approvals
@@ -263,6 +274,9 @@ async def execute_tool(ctx: RunContext, name: str, args: dict[str, Any]) -> str:
     """Execute one tool call. Returns a string result for the model."""
     session = ctx.sandbox_session
     try:
+        if name in ctx.mcp_tool_map:
+            return await _tool_mcp_call(ctx, name, args or {})
+
         if name == "shell_run":
             command = str(args.get("command", ""))
             timeout = int(args.get("timeout") or 120)
@@ -367,6 +381,40 @@ def _fmt_file_read(result: dict[str, Any]) -> str:
     return result.get("content", "")
 
 
+async def _tool_mcp_call(ctx: RunContext, name: str, args: dict[str, Any]) -> str:
+    """Invoke an MCP tool.
+
+    Approval policy: every MCP tool call requires user approval (kind
+    ``mcp_tool``) via the same require_approval path as other gated tools.
+    MCP servers run arbitrary third-party code outside our sandbox, so the
+    conservative default — approve every call — is the only sound one without
+    per-server trust metadata, which the config schema doesn't carry.
+    """
+    ref = ctx.mcp_tool_map[name]
+    client = ctx.mcp_clients.get(ref.server_name)
+    if client is None:
+        return f"MCP server '{ref.server_name}' is not connected"
+    arg_preview = json.dumps(args, default=str)[:400]
+    ok = await require_approval(
+        ctx,
+        "mcp_tool",
+        f"MCP tool call: {ref.server_name}.{ref.tool_name}({arg_preview})",
+        {"server": ref.server_name, "tool": ref.tool_name, "arguments": args},
+    )
+    if not ok:
+        return f"Action denied by user: MCP tool {ref.server_name}.{ref.tool_name}"
+    try:
+        result = await client.call_tool(ref.tool_name, args)
+    except mcp_mod.MCPError as exc:
+        return f"MCP error: {exc}"
+    await log_audit(
+        ctx.db, ctx.bot.user_id, ctx.bot.id, "tool.mcp_executed",
+        {"server": ref.server_name, "tool": ref.tool_name, "result_chars": len(result)},
+    )
+    await ctx.db.commit()
+    return _truncate(result)
+
+
 async def _memory_set(db: AsyncSession, bot_id: str, key: str, value: str) -> None:
     item = (
         await db.execute(
@@ -441,7 +489,11 @@ async def _tool_run_helper(ctx: RunContext, task: str) -> str:
         sandbox_session=ctx.sandbox_session,
         depth=ctx.depth + 1,
         memory=ctx.memory,
+        mcp_clients=ctx.mcp_clients,
+        mcp_tool_map=ctx.mcp_tool_map,
+        mcp_tool_defs=ctx.mcp_tool_defs,
     )
+    helper_tools = HELPER_TOOLS + ctx.mcp_tool_defs
     history: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -456,7 +508,7 @@ async def _tool_run_helper(ctx: RunContext, task: str) -> str:
     for _ in range(settings.helper_max_iterations):
         if runs.is_cancelled(ctx.run.id):
             return "Helper cancelled."
-        resp = await model_clients.chat_completion(ctx.provider_cfg, history, HELPER_TOOLS)
+        resp = await model_clients.chat_completion(ctx.provider_cfg, history, helper_tools)
         history.append(
             {
                 "role": "assistant",
@@ -486,7 +538,9 @@ async def _tool_run_helper(ctx: RunContext, task: str) -> str:
 
 
 # ------------------------------------------------------------------ main loop
-def _build_system_prompt(bot: Bot, thread: Thread, memory: dict[str, str]) -> str:
+def _build_system_prompt(
+    bot: Bot, thread: Thread, memory: dict[str, str], mcp_tool_defs: list[dict] | None = None
+) -> str:
     parts = [bot.system_prompt or "You are Rakazo, a helpful AI teammate with a live computer."]
     if bot.routines_md:
         parts.append("## Your routines\n" + bot.routines_md)
@@ -501,6 +555,14 @@ def _build_system_prompt(bot: Bot, thread: Thread, memory: dict[str, str]) -> st
         "- Package installs, deleting files outside /workspace, and contacting new network hosts require the user's approval — ask via the tool and wait.\n"
         "- Keep responses concise unless the user asked for detail."
     )
+    if mcp_tool_defs:
+        names = ", ".join(t["function"]["name"] for t in mcp_tool_defs)
+        parts.append(
+            "## MCP tools\n"
+            f"The following tools come from external MCP servers: {names}.\n"
+            "- Every MCP tool call requires the user's approval before it runs.\n"
+            "- Their input schemas are authoritative; pass arguments exactly as specified."
+        )
     return "\n\n".join(parts)
 
 
@@ -527,6 +589,7 @@ async def run_agent(
     """Run one agent turn in the background. Emits SSE events on the run bus."""
     runs.register_run(run_id)
     session: SandboxSession | None = None
+    mcp_clients: dict[str, mcp_mod.MCPClient] = {}
 
     async with session_factory() as db:
         try:
@@ -566,12 +629,40 @@ async def run_agent(
                 memory=memory,
             )
 
+            # Connect configured MCP tool servers and expose their tools as
+            # namespaced agent tools (mcp_<server>_<tool>). Failures are
+            # per-server and never break the run.
+            mcp_clients, mcp_tool_map, mcp_errors = await mcp_mod.connect_bot_mcp_servers(
+                bot.mcp_servers or []
+            )
+            for err in mcp_errors:
+                log.warning("Bot %s: %s", bot.id, err)
+            ctx.mcp_clients = mcp_clients
+            ctx.mcp_tool_map = mcp_tool_map
+            ctx.mcp_tool_defs = [
+                _fn(
+                    ref.namespaced,
+                    ref.description or f"MCP tool {ref.tool_name} from server {ref.server_name}",
+                    (ref.input_schema or {}).get("properties", {}),
+                    (ref.input_schema or {}).get("required", []),
+                )
+                for ref in mcp_tool_map.values()
+            ]
+            if mcp_clients or mcp_errors:
+                await log_audit(
+                    db, bot.user_id, bot.id, "mcp.servers_connected",
+                    {"servers": sorted(mcp_clients), "errors": mcp_errors},
+                )
+                await db.commit()
+
+            agent_tools = AGENT_TOOLS + ctx.mcp_tool_defs
+
             await runs.emit(run_id, "run_started", {"bot_id": bot.id, "run_id": run_id})
             await log_audit(db, bot.user_id, bot.id, "run.started", {"run_id": run_id})
             await db.commit()
 
             messages: list[dict[str, Any]] = [
-                {"role": "system", "content": _build_system_prompt(bot, thread, memory)}
+                {"role": "system", "content": _build_system_prompt(bot, thread, memory, ctx.mcp_tool_defs)}
             ]
             history = (
                 await db.execute(
@@ -612,7 +703,7 @@ async def run_agent(
                 async def on_token(t: str) -> None:
                     await runs.emit(run_id, "token", {"text": t})
 
-                resp = await model_clients.chat_completion(provider_cfg, messages, AGENT_TOOLS, on_token)
+                resp = await model_clients.chat_completion(provider_cfg, messages, agent_tools, on_token)
 
                 assistant_msg = Message(
                     thread_id=thread.id,
@@ -697,6 +788,11 @@ async def run_agent(
             if session is not None:
                 try:
                     await session.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
+            for mcp_client in mcp_clients.values():
+                try:
+                    await mcp_client.aclose()
                 except Exception:  # noqa: BLE001
                     pass
             # Keep the event bus briefly so late SSE subscribers can drain it.
