@@ -1,6 +1,6 @@
 # Rakazo
 
-**Rakazo is a self-hosted AI bot platform — an open-source Grok alternative you actually own.**
+**Rakazo is a GROK BOT Alternative self-hosted AI bot platform — an open-source Grok alternative you actually own.**
 
 Give each bot a live computer (sandbox), connect your own model (OpenAI-compatible,
 Anthropic, or local Ollama), and let it do real work: run commands, work with files,
