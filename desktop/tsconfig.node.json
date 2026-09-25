@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","include":["electron.vite.config.*","src/main/**/*","src/preload/**/*","src/shared/**/*","scripts/**/*"]}

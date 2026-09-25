@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rakazo
+      POSTGRES_PASSWORD: rakazo
+      POSTGRES_DB: rakazo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rakazo -d rakazo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rakazo:rakazo@db:5432/rakazo
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the host Docker socket so the local_docker sandbox can spawn
+      # real containers per bot session.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist the auto-generated Fernet key (encrypts stored provider keys).
+      - rakazo-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  rakazo-data:

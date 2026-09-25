@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-paper text-ink font-sans;
+  }
+  ::selection {
+    background: #dbe6ff;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-line rounded-card shadow-soft;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-muted/70 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wide text-muted mb-1.5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-dark shadow-sm;
+  }
+  .btn-secondary {
+    @apply btn bg-white border border-line text-ink hover:bg-gray-50;
+  }
+  .btn-danger {
+    @apply btn bg-accent text-white hover:bg-[#e64a42];
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:text-ink hover:bg-gray-100 px-3 py-1.5;
+  }
+  .link {
+    @apply text-link hover:underline font-medium;
+  }
+  .md-body {
+    @apply text-sm leading-6 text-ink;
+  }
+  .md-body pre {
+    @apply bg-gray-900 text-gray-100 text-xs rounded-lg p-3 overflow-x-auto my-2 font-mono;
+  }
+  .md-body code:not(pre code) {
+    @apply bg-gray-100 text-[13px] rounded px-1.5 py-0.5 font-mono;
+  }
+  .md-body p {
+    @apply my-2;
+  }
+  .md-body ul,
+  .md-body ol {
+    @apply my-2 pl-5 space-y-1;
+  }
+  .md-body ul {
+    @apply list-disc;
+  }
+  .md-body ol {
+    @apply list-decimal;
+  }
+  .md-body h1,
+  .md-body h2,
+  .md-body h3 {
+    @apply font-display font-semibold mt-4 mb-1;
+  }
+  .md-body h1 {
+    @apply text-lg;
+  }
+  .md-body h2 {
+    @apply text-base;
+  }
+  .md-body h3 {
+    @apply text-sm;
+  }
+  .md-body a {
+    @apply text-link underline;
+  }
+  .md-body blockquote {
+    @apply border-l-2 border-line pl-3 text-muted my-2;
+  }
+  .md-body table {
+    @apply w-full text-xs my-2 border-collapse;
+  }
+  .md-body th,
+  .md-body td {
+    @apply border border-line px-2 py-1 text-left;
+  }
+}

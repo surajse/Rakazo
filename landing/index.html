@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rakazo — AI teammates you actually own</title>
+  <meta name="description" content="Rakazo is the open source Grok alternative for developers. AI teammates you actually own: they sign in to your tools, do real work, and come back when they need you." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563EB'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ============ NAV ============ -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a class="wordmark" href="#" aria-label="Rakazo home">
+        <span class="wordmark-mark" aria-hidden="true"></span>
+        <span class="wordmark-text">Rakazo</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how">Product</a>
+        <a href="#selfhost">Self-host</a>
+        <a href="#templates">Templates</a>
+        <a href="#opensource">Open source</a>
+        <a href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">Docs</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="btn btn-secondary" href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-primary" href="#waitlist">Get started</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="container">
+        <p class="eyebrow">Open source · Self-hosted</p>
+        <h1>AI teammates you actually own.</h1>
+        <p class="lede">
+          Rakazo gives you AI teammates that sign in to your tools, do real work, and
+          come back when they need you. Run it on your own machine, with your own keys
+          and your own data.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" href="#waitlist">Get started</a>
+          <a class="btn btn-secondary btn-lg" href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+
+        <!-- Product proof panel -->
+        <div class="proof" role="img" aria-label="Mockup of a Rakazo bot triaging an inbox, listing its tool calls with statuses">
+          <div class="proof-header">
+            <div class="proof-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <p class="proof-title">inbox-manager <span class="proof-badge">● live</span></p>
+          </div>
+          <div class="proof-body">
+            <div class="proof-step">
+              <span class="proof-status done" aria-hidden="true">✓</span>
+              <div class="proof-step-text">
+                <p class="proof-tool">gmail.search <span class="proof-arg">label:inbox newer_than:1d</span></p>
+                <p class="proof-note">Found 14 unread threads</p>
+              </div>
+            </div>
+            <div class="proof-step">
+              <span class="proof-status done" aria-hidden="true">✓</span>
+              <div class="proof-step-text">
+                <p class="proof-tool">gmail.draft <span class="proof-arg">to: sarah@acme.co · re: Q3 pricing</span></p>
+                <p class="proof-note">Drafted reply using the pricing playbook</p>
+              </div>
+            </div>
+            <div class="proof-step">
+              <span class="proof-status done" aria-hidden="true">✓</span>
+              <div class="proof-step-text">
+                <p class="proof-tool">calendar.check <span class="proof-arg">next: 48h</span></p>
+                <p class="proof-note">Confirmed you're free Thursday afternoon</p>
+              </div>
+            </div>
+            <div class="proof-step current">
+              <span class="proof-status spinner" aria-hidden="true"></span>
+              <div class="proof-step-text">
+                <p class="proof-tool">approval.request <span class="proof-arg">send draft to sarah@acme.co</span></p>
+                <p class="proof-note">Waiting on you — one tap to send</p>
+              </div>
+            </div>
+            <div class="proof-reply">
+              <p><strong>Rakazo</strong> triaged your inbox in 38 seconds. 11 archived, 2 drafted, and 1 needs your approval.</p>
+              <div class="proof-actions">
+                <button type="button" class="btn btn-primary btn-sm">Approve</button>
+                <button type="button" class="btn btn-secondary btn-sm">Review first</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section class="how" id="how" aria-labelledby="how-heading">
+      <div class="container">
+        <h2 id="how-heading" class="section-heading">How it works</h2>
+        <ol class="steps">
+          <li class="step">
+            <span class="step-number" aria-hidden="true">1</span>
+            <h3>Connect your model</h3>
+            <p>Bring your own API key or a local model. Rakazo talks to it over a standard interface — swap models whenever you like.</p>
+          </li>
+          <li class="step">
+            <span class="step-number" aria-hidden="true">2</span>
+            <h3>Pick a sandbox</h3>
+            <p>Give the bot a real computer: a Docker sandbox it can browse from, run commands on, and work with files in.</p>
+          </li>
+          <li class="step">
+            <span class="step-number" aria-hidden="true">3</span>
+            <h3>Give it a job</h3>
+            <p>Start from a template or describe the job in plain Markdown. The bot runs it and pings you when it needs a decision.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ SELF-HOST ============ -->
+    <section class="selfhost" id="selfhost" aria-labelledby="selfhost-heading">
+      <div class="container">
+        <h2 id="selfhost-heading" class="section-heading">Run it on your own machine.</h2>
+        <p class="section-lede">
+          No account required, no data leaving your network unless you say so.
+          Rakazo is a normal app you deploy: Docker and Postgres, and you're up.
+        </p>
+        <div class="card-grid">
+          <div class="card">
+            <h3>Your own keys</h3>
+            <p>Bring any model — hosted APIs or local weights. Your keys live in your environment, never on someone else's server.</p>
+          </div>
+          <div class="card">
+            <h3>Your own data</h3>
+            <p>Threads, memory, and history live in Postgres on your box. Export or wipe it any time; nothing is phoned home.</p>
+          </div>
+          <div class="card">
+            <h3>Routines in plain Markdown</h3>
+            <p>A bot's job is just a Markdown file you can read, edit, and version-control. No black-box prompts.</p>
+          </div>
+          <div class="card">
+            <h3>Approvals + audit log</h3>
+            <p>Risky actions pause for your approval. Every tool call is written to an audit log you can inspect later.</p>
+          </div>
+        </div>
+        <div class="terminal-card">
+          <div class="terminal-header" aria-hidden="true">
+            <span></span><span></span><span></span>
+            <p>terminal</p>
+          </div>
+          <pre><code>git clone https://github.com/rakazo/rakazo.git
+cd rakazo
+docker compose up</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ TEMPLATES ============ -->
+    <section class="templates" id="templates" aria-labelledby="templates-heading">
+      <div class="container">
+        <h2 id="templates-heading" class="section-heading">Start from a template.</h2>
+        <p class="section-lede">
+          Each template is a complete, working job: sandbox, tools, and a Markdown routine.
+          Fork one and make it yours.
+        </p>
+        <div class="template-grid">
+          <div class="card template-card">
+            <h3>Inbox Manager</h3>
+            <p>Triages email, drafts replies from your playbooks, and only interrupts you for real decisions.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Sales Outbound</h3>
+            <p>Researches prospects, writes personalized first touches, and logs everything to your CRM.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Talent Scout</h3>
+            <p>Screens applicants against the role brief, schedules interviews, and keeps the pipeline moving.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Expense Manager</h3>
+            <p>Collects receipts, categorizes spend, and prepares monthly reports for your accountant.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Bug Triage</h3>
+            <p>Watches your issue tracker, reproduces reports in a sandbox, and drafts fixes for review.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Account Manager</h3>
+            <p>Monitors customer health signals, preps renewal notes, and flags at-risk accounts early.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Paid Media</h3>
+            <p>Pulls ad performance daily, spots wasted spend, and proposes budget shifts for approval.</p>
+          </div>
+          <div class="card template-card">
+            <h3>Chief of Staff</h3>
+            <p>Preps your briefings, runs your follow-ups, and keeps every thread moving while you're away.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ OPEN SOURCE ============ -->
+    <section class="opensource" id="opensource" aria-labelledby="opensource-heading">
+      <div class="container">
+        <h2 id="opensource-heading" class="section-heading">Open by default.</h2>
+        <p class="section-lede">
+          Trust isn't a marketing claim. It's what you get when nothing is hidden.
+        </p>
+        <ul class="trust-list">
+          <li><span class="trust-check" aria-hidden="true">✓</span><strong>MIT licensed.</strong>&nbsp;Use it, fork it, ship it — no strings.</li>
+          <li><span class="trust-check" aria-hidden="true">✓</span><strong>Your machine, your keys.</strong>&nbsp;The code is the contract: data stays local unless you move it.</li>
+          <li><span class="trust-check" aria-hidden="true">✓</span><strong>Full audit log.</strong>&nbsp;Every action the bot takes is recorded and reviewable.</li>
+          <li><span class="trust-check" aria-hidden="true">✓</span><strong>No lock-in.</strong>&nbsp;Standard formats, standard databases, swappable models.</li>
+        </ul>
+        <div class="stars-row">
+          <span class="stars-badge" aria-hidden="true">★ <span id="stars-count">Star us</span></span>
+          <a class="btn btn-secondary" href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ WAITLIST ============ -->
+    <section class="waitlist" id="waitlist" aria-labelledby="waitlist-heading">
+      <div class="container">
+        <div class="waitlist-card">
+          <h2 id="waitlist-heading">Rakazo Cloud is coming.</h2>
+          <p>Prefer not to self-host? Join the waitlist and we'll email you when managed hosting opens up.</p>
+          <form id="waitlist-form" novalidate>
+            <label class="visually-hidden" for="waitlist-email">Email address</label>
+            <input type="email" id="waitlist-email" name="email" placeholder="you@company.com" autocomplete="email" required />
+            <button type="submit" class="btn btn-primary">Join the waitlist</button>
+          </form>
+          <p class="form-error" id="waitlist-error" role="alert" hidden>Please enter a valid email address.</p>
+          <p class="form-success" id="waitlist-success" role="status" hidden>You're on the list — we'll be in touch.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <p class="footer-copy">© 2026 Rakazo</p>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">Docs</a>
+        <a href="#templates">Templates</a>
+        <a href="https://github.com/rakazo/rakazo" target="_blank" rel="noopener">Status</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

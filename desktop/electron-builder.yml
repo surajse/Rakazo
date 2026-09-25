@@ -1,0 +1,65 @@
+appId: com.rakazo.desktop
+productName: Rakazo
+copyright: Copyright © 2026 Rakazo
+
+directories:
+  output: release
+  buildResources: assets
+
+# Ship icons where the packaged app expects them (process.resourcesPath/assets).
+extraResources:
+  - from: assets
+    to: assets
+    filter:
+      - '*.png'
+
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+
+# Unsigned dev builds: no code signing configured on purpose.
+# For signed releases, see README.md ("Code signing" section).
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: assets/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  notarize: false
+  extendInfo:
+    CFBundleURLTypes:
+      - CFBundleURLName: com.rakazo.desktop
+        CFBundleURLSchemes:
+          - rakazo
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+  artifactName: Rakazo-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Rakazo
+
+linux:
+  target:
+    - AppImage
+  icon: assets/icon.png
+  category: Utility
+  maintainer: Rakazo
+  description: Rakazo desktop companion — your self-hosted AI teammates, always at hand.
+
+protocols:
+  - name: Rakazo
+    schemes:
+      - rakazo
