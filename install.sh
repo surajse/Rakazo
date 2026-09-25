@@ -2,7 +2,12 @@
 # Rakazo one-command installer.
 #
 # Checks prerequisites, creates .env from .env.example (generating a random
-# JWT_SECRET if needed), then builds and starts the stack with Docker Compose.
+# JWT_SECRET if needed), then pulls the published backend image (or builds
+# it locally as a fallback) and starts the stack with Docker Compose.
+#
+# Env vars:
+#   RAKAZO_IMAGE_TAG   published image tag to run (default: edge)
+#   RAKAZO_BUILD=1     always build the backend image locally instead of pulling
 #
 # Usage: ./install.sh
 set -euo pipefail
@@ -43,6 +48,14 @@ fi
 
 echo "✔ Prerequisites OK: $(docker --version | head -n1), $(docker compose version --short 2>/dev/null || docker compose version | head -n1)"
 
+# --- Image selection --------------------------------------------------------
+# RAKAZO_IMAGE_TAG: which published backend image to run (default: edge).
+#   Examples: RAKAZO_IMAGE_TAG=1.2.3 ./install.sh   (pin a released version)
+#             RAKAZO_IMAGE_TAG=edge ./install.sh    (latest published build)
+# RAKAZO_BUILD: set to 1 to skip the image pull and always build locally.
+export RAKAZO_IMAGE_TAG="${RAKAZO_IMAGE_TAG:-edge}"
+RAKAZO_BUILD="${RAKAZO_BUILD:-}"
+
 # --- .env bootstrap -------------------------------------------------------
 if [ -f .env ]; then
   echo "✔ .env already exists — leaving it untouched."
@@ -64,9 +77,25 @@ else
   echo "  Tip: edit .env (CORS_ORIGINS, model provider keys) before going to production."
 fi
 
-# --- Build & start --------------------------------------------------------
-echo "Building and starting the Rakazo stack (this may take a few minutes) ..."
-docker compose up -d --build
+# --- Pull published image, or fall back to a local build --------------------
+# Default path: pull the published backend image and start without building.
+# Fallback: if the pull fails (image not published yet, registry unreachable,
+# offline) — or when RAKAZO_BUILD=1 — build the image locally instead.
+if [ -z "${RAKAZO_BUILD}" ]; then
+  echo "Pulling published backend image ghcr.io/surajse/rakazo-backend:${RAKAZO_IMAGE_TAG} ..."
+  if docker compose pull api 2>/dev/null; then
+    echo "✔ Pulled ghcr.io/surajse/rakazo-backend:${RAKAZO_IMAGE_TAG} — starting without a local build."
+    docker compose up -d
+  else
+    echo "NOTE: could not pull ghcr.io/surajse/rakazo-backend:${RAKAZO_IMAGE_TAG}."
+    echo "      (The image may not be published yet, or the registry is unreachable.)"
+    echo "      Falling back to building the backend image locally ..."
+    docker compose up -d --build
+  fi
+else
+  echo "RAKAZO_BUILD=1 — skipping the image pull and building locally ..."
+  docker compose up -d --build
+fi
 
 # --- Next steps -----------------------------------------------------------
 echo ""

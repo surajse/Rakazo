@@ -35,6 +35,10 @@ export interface Sandbox {
   name: string;
   kind: string;
   config?: Record<string, unknown> | null;
+  shared: boolean;
+  is_owner: boolean;
+  owner_name?: string | null;
+  owner_email?: string | null;
   created_at?: string;
 }
 

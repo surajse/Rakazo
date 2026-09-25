@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { del, get, patch, post } from '../api/client';
 import type { ApiError, ModelProvider, ModelProviderKind, Sandbox, SandboxKind, User } from '../api/types';
-import { Alert, Badge, EmptyState, Field, Modal, PageHeader, Spinner } from '../components/ui';
+import { Alert, Badge, EmptyState, Field, Modal, PageHeader, Spinner, ToggleSwitch } from '../components/ui';
 import { useAuth } from '../store/auth';
 import { MODEL_PRESETS } from '../lib/utils';
 
@@ -149,6 +149,15 @@ export function SettingsPage() {
     }
   };
 
+  const toggleShare = async (s: Sandbox, shared: boolean) => {
+    try {
+      const updated = await patch<Sandbox>(`/api/sandboxes/${s.id}`, { shared });
+      setSandboxes((prev) => prev.map((x) => (x.id === s.id ? updated : x)));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not update sharing');
+    }
+  };
+
   const addSandbox = async () => {
     setSandboxBusy(true);
     setError(null);
@@ -248,9 +257,25 @@ export function SettingsPage() {
                       </p>
                     </div>
                     <Badge tone="gray">{s.kind}</Badge>
-                    <button className="btn-ghost !text-red-600 text-xs" onClick={() => deleteSandbox(s)}>
-                      Delete
-                    </button>
+                    {s.is_owner ? (
+                      <>
+                        <ToggleSwitch
+                          checked={s.shared}
+                          onChange={(next) => toggleShare(s, next)}
+                          label="Shared with team"
+                        />
+                        <button className="btn-ghost !text-red-600 text-xs" onClick={() => deleteSandbox(s)}>
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <Badge tone="blue">Shared</Badge>
+                        <span className="text-xs text-muted">
+                          by {s.owner_name || s.owner_email || 'another user'}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

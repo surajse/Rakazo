@@ -1,0 +1,56 @@
+# Build and publish the backend image to GHCR (multi-arch).
+#
+# Triggered by git tags matching `v*` (e.g. `git tag v1.2.3 && git push origin v1.2.3`)
+# or manually via workflow_dispatch. Publishes:
+#   ghcr.io/surajse/rakazo-backend:<version>   (git tag without the leading `v`)
+#   ghcr.io/surajse/rakazo-backend:edge        (latest commit on the default branch / manual runs)
+name: Publish backend image
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ghcr.io/surajse/rakazo-backend
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # `type=semver,pattern={{version}}` turns tag `v1.2.3` into image tag `1.2.3`.
+          # `type=edge` always produces the `edge` tag.
+          tags: |
+            type=semver,pattern={{version}}
+            type=edge
+
+      - name: Build and push (linux/amd64 + linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -47,6 +47,17 @@ async def _template_prompts(db: AsyncSession, template_name: str | None) -> tupl
 
 
 # ------------------------------------------------------------------ CRUD
+async def _check_sandbox_access(db: AsyncSession, sandbox_id: str, user: User) -> Sandbox:
+    """A bot may use the user's own sandbox, or any sandbox shared with the
+    team (all authenticated users are "the team"; no org model). Read/execute
+    access only — editing/deleting/sharing stays owner-only (enforced in the
+    sandboxes router)."""
+    sandbox = await db.get(Sandbox, sandbox_id)
+    if sandbox is None or (sandbox.user_id != user.id and not sandbox.shared):
+        raise HTTPException(status_code=400, detail="Invalid sandbox_id")
+    return sandbox
+
+
 @router.get("", response_model=list[schemas.BotOut])
 async def list_bots(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     rows = (
@@ -64,9 +75,7 @@ async def create_bot(
         if provider is None or provider.user_id != user.id:
             raise HTTPException(status_code=400, detail="Invalid model_provider_id")
     if data.sandbox_id:
-        sandbox = await db.get(Sandbox, data.sandbox_id)
-        if sandbox is None or sandbox.user_id != user.id:
-            raise HTTPException(status_code=400, detail="Invalid sandbox_id")
+        await _check_sandbox_access(db, data.sandbox_id, user)
 
     tpl_system, tpl_routines = await _template_prompts(db, data.template)
     bot = Bot(
@@ -78,6 +87,7 @@ async def create_bot(
         system_prompt=data.system_prompt if data.system_prompt is not None else tpl_system,
         routines_md=data.routines_md if data.routines_md is not None else tpl_routines,
         mcp_servers=data.mcp_servers,
+        openapi_specs=data.openapi_specs,
     )
     db.add(bot)
     await db.flush()
@@ -107,9 +117,7 @@ async def update_bot(
             bot.model_provider_id = None
     if data.sandbox_id is not None:
         if data.sandbox_id:
-            sandbox = await db.get(Sandbox, data.sandbox_id)
-            if sandbox is None or sandbox.user_id != user.id:
-                raise HTTPException(status_code=400, detail="Invalid sandbox_id")
+            sandbox = await _check_sandbox_access(db, data.sandbox_id, user)
             bot.sandbox_id = data.sandbox_id
         else:
             bot.sandbox_id = None
@@ -119,6 +127,8 @@ async def update_bot(
             setattr(bot, field, value)
     if data.mcp_servers is not None:
         bot.mcp_servers = data.mcp_servers
+    if data.openapi_specs is not None:
+        bot.openapi_specs = data.openapi_specs
     await log_audit(db, user.id, bot.id, "bot.updated", {"fields": data.model_dump(exclude_unset=True).keys().__str__()})
     await db.commit()
     return bot

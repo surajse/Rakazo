@@ -67,6 +67,46 @@ export function EmptyState({
   );
 }
 
+export function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className={cx('inline-flex cursor-pointer items-center gap-2 text-xs text-muted', disabled && 'cursor-not-allowed opacity-60')}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={(e) => {
+          e.preventDefault();
+          onChange(!checked);
+        }}
+        className={cx(
+          'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+          checked ? 'bg-primary' : 'bg-gray-300',
+        )}
+      >
+        <span
+          className={cx(
+            'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+            checked ? 'translate-x-4' : 'translate-x-0.5',
+          )}
+        />
+      </button>
+      {label && <span className="select-none">{label}</span>}
+    </label>
+  );
+}
+
 export function Modal({
   open,
   onClose,

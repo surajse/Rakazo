@@ -34,7 +34,7 @@ from app.models import (
     SeenHost,
     Thread,
 )
-from app.services import mcp as mcp_mod, model_clients, runs, sandbox as sandbox_mod
+from app.services import mcp as mcp_mod, model_clients, openapi_tools as openapi_mod, runs, sandbox as sandbox_mod
 from app.services.audit import log_audit
 from app.services.model_clients import ProviderConfig
 from app.services.sandbox import SandboxError, SandboxSession
@@ -201,6 +201,12 @@ class RunContext:
     mcp_tool_map: dict[str, mcp_mod.MCPToolRef] = field(default_factory=dict)
     # Function-calling tool defs for the MCP tools (appended to AGENT_TOOLS).
     mcp_tool_defs: list[dict] = field(default_factory=list)
+    # OpenAPI tool sources loaded at run start.
+    openapi_sources: dict[str, openapi_mod.OpenAPISource] = field(default_factory=dict)
+    # namespaced tool name ("openapi_<source>_<operation>") -> OpenAPIToolRef
+    openapi_tool_map: dict[str, openapi_mod.OpenAPIToolRef] = field(default_factory=dict)
+    # Function-calling tool defs for the OpenAPI tools (appended to AGENT_TOOLS).
+    openapi_tool_defs: list[dict] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------ approvals
@@ -276,6 +282,9 @@ async def execute_tool(ctx: RunContext, name: str, args: dict[str, Any]) -> str:
     try:
         if name in ctx.mcp_tool_map:
             return await _tool_mcp_call(ctx, name, args or {})
+
+        if name in ctx.openapi_tool_map:
+            return await _tool_openapi_call(ctx, name, args or {})
 
         if name == "shell_run":
             command = str(args.get("command", ""))
@@ -415,6 +424,40 @@ async def _tool_mcp_call(ctx: RunContext, name: str, args: dict[str, Any]) -> st
     return _truncate(result)
 
 
+async def _tool_openapi_call(ctx: RunContext, name: str, args: dict[str, Any]) -> str:
+    """Invoke an OpenAPI operation.
+
+    Approval policy: every OpenAPI tool call requires user approval (kind
+    ``openapi_tool``) via the same require_approval path as other gated tools.
+    Like MCP tools, these hit arbitrary third-party APIs outside our sandbox,
+    so approve-every-call is the conservative default.
+    """
+    ref = ctx.openapi_tool_map[name]
+    source = ctx.openapi_sources.get(ref.source_name)
+    if source is None:
+        return f"OpenAPI source '{ref.source_name}' is not connected"
+    arg_preview = json.dumps(args, default=str)[:400]
+    ok = await require_approval(
+        ctx,
+        "openapi_tool",
+        f"OpenAPI tool call: {ref.source_name}.{ref.operation}({arg_preview})",
+        {"source": ref.source_name, "operation": ref.operation, "arguments": args},
+    )
+    if not ok:
+        return f"Action denied by user: OpenAPI tool {ref.source_name}.{ref.operation}"
+    try:
+        result = await source.call_tool(ref, args)
+    except openapi_mod.OpenAPIError as exc:
+        # Error text never contains configured secrets (see openapi_tools).
+        return f"OpenAPI error: {exc}"
+    await log_audit(
+        ctx.db, ctx.bot.user_id, ctx.bot.id, "tool.openapi_executed",
+        {"source": ref.source_name, "operation": ref.operation, "result_chars": len(result)},
+    )
+    await ctx.db.commit()
+    return _truncate(result)
+
+
 async def _memory_set(db: AsyncSession, bot_id: str, key: str, value: str) -> None:
     item = (
         await db.execute(
@@ -492,8 +535,11 @@ async def _tool_run_helper(ctx: RunContext, task: str) -> str:
         mcp_clients=ctx.mcp_clients,
         mcp_tool_map=ctx.mcp_tool_map,
         mcp_tool_defs=ctx.mcp_tool_defs,
+        openapi_sources=ctx.openapi_sources,
+        openapi_tool_map=ctx.openapi_tool_map,
+        openapi_tool_defs=ctx.openapi_tool_defs,
     )
-    helper_tools = HELPER_TOOLS + ctx.mcp_tool_defs
+    helper_tools = HELPER_TOOLS + ctx.mcp_tool_defs + ctx.openapi_tool_defs
     history: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -539,7 +585,11 @@ async def _tool_run_helper(ctx: RunContext, task: str) -> str:
 
 # ------------------------------------------------------------------ main loop
 def _build_system_prompt(
-    bot: Bot, thread: Thread, memory: dict[str, str], mcp_tool_defs: list[dict] | None = None
+    bot: Bot,
+    thread: Thread,
+    memory: dict[str, str],
+    mcp_tool_defs: list[dict] | None = None,
+    openapi_tool_defs: list[dict] | None = None,
 ) -> str:
     parts = [bot.system_prompt or "You are Rakazo, a helpful AI teammate with a live computer."]
     if bot.routines_md:
@@ -562,6 +612,15 @@ def _build_system_prompt(
             f"The following tools come from external MCP servers: {names}.\n"
             "- Every MCP tool call requires the user's approval before it runs.\n"
             "- Their input schemas are authoritative; pass arguments exactly as specified."
+        )
+    if openapi_tool_defs:
+        names = ", ".join(t["function"]["name"] for t in openapi_tool_defs)
+        parts.append(
+            "## OpenAPI tools\n"
+            f"The following tools call external HTTP APIs described by OpenAPI specs: {names}.\n"
+            "- Every OpenAPI tool call requires the user's approval before it runs.\n"
+            "- Their input schemas are authoritative; pass arguments exactly as specified.\n"
+            "- For operations with a JSON request body, pass it as a single `body` object."
         )
     return "\n\n".join(parts)
 
@@ -590,6 +649,7 @@ async def run_agent(
     runs.register_run(run_id)
     session: SandboxSession | None = None
     mcp_clients: dict[str, mcp_mod.MCPClient] = {}
+    openapi_sources: dict[str, openapi_mod.OpenAPISource] = {}
 
     async with session_factory() as db:
         try:
@@ -655,14 +715,40 @@ async def run_agent(
                 )
                 await db.commit()
 
-            agent_tools = AGENT_TOOLS + ctx.mcp_tool_defs
+            # Fetch configured OpenAPI specs and expose their operations as
+            # namespaced agent tools (openapi_<source>_<operation>). Failures
+            # are per-source and never break the run.
+            openapi_sources, openapi_tool_map, openapi_errors = (
+                await openapi_mod.connect_bot_openapi_specs(bot.openapi_specs or [])
+            )
+            for err in openapi_errors:
+                log.warning("Bot %s: %s", bot.id, err)
+            ctx.openapi_sources = openapi_sources
+            ctx.openapi_tool_map = openapi_tool_map
+            ctx.openapi_tool_defs = [
+                _fn(
+                    ref.namespaced,
+                    ref.description or f"OpenAPI operation {ref.operation} from {ref.source_name}",
+                    (ref.input_schema or {}).get("properties", {}),
+                    (ref.input_schema or {}).get("required", []),
+                )
+                for ref in openapi_tool_map.values()
+            ]
+            if openapi_sources or openapi_errors:
+                await log_audit(
+                    db, bot.user_id, bot.id, "openapi.specs_connected",
+                    {"sources": sorted(openapi_sources), "errors": openapi_errors},
+                )
+                await db.commit()
+
+            agent_tools = AGENT_TOOLS + ctx.mcp_tool_defs + ctx.openapi_tool_defs
 
             await runs.emit(run_id, "run_started", {"bot_id": bot.id, "run_id": run_id})
             await log_audit(db, bot.user_id, bot.id, "run.started", {"run_id": run_id})
             await db.commit()
 
             messages: list[dict[str, Any]] = [
-                {"role": "system", "content": _build_system_prompt(bot, thread, memory, ctx.mcp_tool_defs)}
+                {"role": "system", "content": _build_system_prompt(bot, thread, memory, ctx.mcp_tool_defs, ctx.openapi_tool_defs)}
             ]
             history = (
                 await db.execute(
@@ -793,6 +879,11 @@ async def run_agent(
             for mcp_client in mcp_clients.values():
                 try:
                     await mcp_client.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+            for openapi_source in openapi_sources.values():
+                try:
+                    await openapi_source.aclose()
                 except Exception:  # noqa: BLE001
                     pass
             # Keep the event bus briefly so late SSE subscribers can drain it.

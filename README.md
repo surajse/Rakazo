@@ -22,18 +22,48 @@ Requirements: Docker Engine, Docker Compose plugin, curl, openssl.
 ```
 
 The installer checks prerequisites, creates `.env` from `.env.example`
-(generating a random `JWT_SECRET`), then builds and starts the stack with
-`docker compose up -d --build`.
+(generating a random `JWT_SECRET`), then pulls the published backend image
+`ghcr.io/surajse/rakazo-backend:edge` and starts the stack with
+`docker compose up -d` — no local build needed. If the image can't be pulled
+(not published yet, or the registry is unreachable), the installer falls back
+to building locally with `docker compose up -d --build`.
+
+Published images (built for `linux/amd64` and `linux/arm64`):
+
+- `ghcr.io/surajse/rakazo-backend:edge` — latest build from the default branch
+- `ghcr.io/surajse/rakazo-backend:<version>` — a released version, e.g. `:1.2.3`
+
+Two environment variables control the installer:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `RAKAZO_IMAGE_TAG` | `edge` | Which published image tag to pull and run (e.g. `RAKAZO_IMAGE_TAG=1.2.3 ./install.sh` pins a release) |
+| `RAKAZO_BUILD` | _(empty)_ | Set to `1` to skip the pull and always build the backend image locally |
 
 <details>
 <summary>Manual install (alternative)</summary>
 
 ```bash
 cp .env.example .env        # then set JWT_SECRET to a long random value
-docker compose up -d --build
+docker compose pull api     # or: docker compose up -d --build to build locally
+docker compose up -d
 ```
 
 </details>
+
+### Cutting a release (maintainers)
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Pushing a `v*` tag triggers the "Publish backend image" workflow, which builds
+a multi-arch image and pushes `ghcr.io/surajse/rakazo-backend:1.2.3` and
+`ghcr.io/surajse/rakazo-backend:edge` to GHCR. The workflow can also be run
+manually from the Actions tab (it then publishes only the `edge` tag).
+Installers and upgrades pick up new images via `docker compose pull api` —
+or pin a version with `RAKAZO_IMAGE_TAG=1.2.3`.
 
 - API: http://localhost:8000 (interactive docs at `/docs`)
 - Health: http://localhost:8000/api/health

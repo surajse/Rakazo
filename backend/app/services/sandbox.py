@@ -9,8 +9,10 @@ Built-in kinds:
     container needs /var/run/docker.sock mounted (see docker-compose.yml).
   - e2b: real cloud sandboxes via the E2B SDK (needs E2B_API_KEY or
     api_key in the provider config).
-  - daytona / modal: stubs with a config schema and a clear
-    "not configured" error so they can be plugged in later. See README for how
+  - daytona: real cloud sandboxes via the Daytona SDK (needs DAYTONA_API_KEY or
+    api_key in the provider config).
+  - modal: stub with a config schema and a clear
+    "not configured" error so it can be plugged in later. See README for how
     to add a provider.
 """
 from __future__ import annotations
@@ -236,6 +238,49 @@ def _extract_title(html: str) -> str | None:
     return html_module.unescape(m.group(1).strip()) if m else None
 
 
+async def _remote_http_fetch(
+    shell_run: Any, url: str, timeout: int = 30
+) -> dict[str, Any]:
+    """Fetch a URL from inside a remote cloud sandbox via python3 + urllib.
+
+    Shared by the cloud providers (e2b, daytona): runs a small python3
+    one-liner in the remote sandbox through the given shell_run callable
+    (an async ``(command, timeout=...) -> {exit_code, stdout, stderr}``).
+    Returns {url, status, body} (body truncated).
+    """
+    script = (
+        "import json, urllib.request;"
+        f"req = urllib.request.Request({url!r}, headers={{'User-Agent': 'Rakazo/1.0'}});"
+        f"resp = urllib.request.urlopen(req, timeout={int(timeout)});"
+        "body = resp.read(60000).decode('utf-8', errors='replace');"
+        "print(json.dumps({'status': resp.status, 'body': body}))"
+    )
+    result = await shell_run(f"python3 -c {sh_quote(script)}", timeout=timeout + 10)
+    if result["exit_code"] != 0:
+        err = (result.get("stderr") or result.get("stdout") or "").strip()
+        return {"url": url, "error": err[-2000:] or "fetch failed"}
+    try:
+        data = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        return {"url": url, "error": "could not parse response"}
+    data["url"] = url
+    return data
+
+
+async def _remote_browser_snapshot(http_fetch: Any, url: str) -> dict[str, Any]:
+    """Best-effort rendered-page text snapshot via the given http_fetch callable.
+
+    This is NOT a real browser render (no JS execution) — same limitation as
+    the local_docker provider.
+    """
+    fetched = await http_fetch(url)
+    if "error" in fetched:
+        return {"url": url, "error": fetched["error"]}
+    text = _html_to_text(fetched.get("body", ""))
+    title = _extract_title(fetched.get("body", ""))
+    return {"url": url, "title": title, "text": text[:30000]}
+
+
 class LocalDockerProvider(SandboxProvider):
     kind = "local_docker"
     name = "Local Docker"
@@ -363,36 +408,10 @@ class E2BSession(SandboxSession):
         return {"path": path, "entries": out}
 
     async def http_fetch(self, url: str, timeout: int = 30) -> dict[str, Any]:
-        script = (
-            "import json, urllib.request;"
-            f"req = urllib.request.Request({url!r}, headers={{'User-Agent': 'Rakazo/1.0'}});"
-            f"resp = urllib.request.urlopen(req, timeout={int(timeout)});"
-            "body = resp.read(60000).decode('utf-8', errors='replace');"
-            "print(json.dumps({'status': resp.status, 'body': body}))"
-        )
-        result = await self.shell_run(f"python3 -c {sh_quote(script)}", timeout=timeout + 10)
-        if result["exit_code"] != 0:
-            err = (result["stderr"] or result["stdout"]).strip()
-            return {"url": url, "error": err[-2000:] or "fetch failed"}
-        try:
-            data = json.loads(result["stdout"])
-        except json.JSONDecodeError:
-            return {"url": url, "error": "could not parse response"}
-        data["url"] = url
-        return data
+        return await _remote_http_fetch(self.shell_run, url, timeout=timeout)
 
     async def browser_snapshot(self, url: str) -> dict[str, Any]:
-        """Best-effort snapshot: fetch the page and extract readable text.
-
-        This is NOT a real browser render (no JS execution) — same limitation
-        as the local_docker provider.
-        """
-        fetched = await self.http_fetch(url)
-        if "error" in fetched:
-            return {"url": url, "error": fetched["error"]}
-        text = _html_to_text(fetched.get("body", ""))
-        title = _extract_title(fetched.get("body", ""))
-        return {"url": url, "title": title, "text": text[:30000]}
+        return await _remote_browser_snapshot(self.http_fetch, url)
 
     async def destroy(self) -> None:
         def _kill() -> None:
@@ -458,7 +477,158 @@ class E2BProvider(SandboxProvider):
         return E2BSession(sandbox)
 
 
-# ------------------------------------------------- stubs for future providers
+# ------------------------------------------------------------------ daytona
+class DaytonaSession(SandboxSession):
+    """SandboxSession backed by a real Daytona cloud sandbox.
+
+    The daytona SDK is synchronous, so every SDK call runs in a worker thread.
+
+    Note: Daytona's ExecuteResponse exposes a single combined output stream
+    (``result``) rather than separate stdout/stderr streams, so the ``stderr``
+    field in shell_run results is always "".
+    """
+
+    def __init__(self, sandbox: Any):
+        self._sandbox = sandbox
+
+    async def shell_run(self, command: str, timeout: int = 120) -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(
+                self._sandbox.process.exec, command, timeout=timeout
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxError(f"daytona shell_run failed: {exc}") from exc
+        return {
+            "exit_code": result.exit_code,
+            "stdout": (result.result or "")[-20000:],
+            "stderr": "",
+        }
+
+    async def file_read(self, path: str) -> dict[str, Any]:
+        try:
+            content = await asyncio.to_thread(self._sandbox.fs.download_file, path)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "read failed"}
+        if content is None:
+            return {"path": path, "error": "file not found or empty"}
+        return {"path": path, "content": content.decode("utf-8", errors="replace")[:100000]}
+
+    async def file_write(self, path: str, content: str) -> dict[str, Any]:
+        def _write() -> None:
+            parent = os.path.dirname(path)
+            if parent:
+                try:
+                    self._sandbox.fs.create_folder(parent, "0755")
+                except Exception:  # noqa: BLE001
+                    pass  # folder already exists or the daemon creates it
+            self._sandbox.fs.upload_file(src=content.encode("utf-8"), dst=path)
+
+        try:
+            await asyncio.to_thread(_write)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "write failed"}
+        return {"path": path, "bytes_written": len(content.encode("utf-8"))}
+
+    async def file_list(self, path: str = "/workspace") -> dict[str, Any]:
+        try:
+            infos = await asyncio.to_thread(self._sandbox.fs.list_files, path)
+        except Exception as exc:  # noqa: BLE001
+            return {"path": path, "error": str(exc)[:2000] or "list failed"}
+        out = []
+        for info in infos or []:
+            out.append(
+                {
+                    "name": info.name,
+                    "type": "dir" if getattr(info, "is_dir", False) else "file",
+                    "size": getattr(info, "size", None),
+                }
+            )
+        return {"path": path, "entries": out}
+
+    async def http_fetch(self, url: str, timeout: int = 30) -> dict[str, Any]:
+        return await _remote_http_fetch(self.shell_run, url, timeout=timeout)
+
+    async def browser_snapshot(self, url: str) -> dict[str, Any]:
+        return await _remote_browser_snapshot(self.http_fetch, url)
+
+    async def destroy(self) -> None:
+        def _delete() -> None:
+            try:
+                self._sandbox.delete()
+            except Exception:  # noqa: BLE001
+                pass  # already gone or unreachable; nothing to do
+
+        await asyncio.to_thread(_delete)
+
+
+class DaytonaProvider(SandboxProvider):
+    kind = "daytona"
+    name = "Daytona"
+    description = (
+        "Cloud sandboxes via Daytona (needs DAYTONA_API_KEY env var or api_key in config)."
+    )
+    env_var = "DAYTONA_API_KEY"
+    setup_hint = "Set the DAYTONA_API_KEY env var or pass api_key in the provider config."
+
+    def config_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "api_key": {"type": "string", "description": "Daytona API key (or DAYTONA_API_KEY env)."},
+                "snapshot": {
+                    "type": "string",
+                    "description": "Daytona snapshot to boot the sandbox from (maps to CreateSandboxFromSnapshotParams.snapshot).",
+                },
+                "timeout": {"type": "integer", "default": 300},
+            },
+        }
+
+    def _api_key(self, config: dict[str, Any] | None) -> str | None:
+        return (config or {}).get("api_key") or os.environ.get("DAYTONA_API_KEY")
+
+    def is_configured(self) -> bool:
+        try:
+            import daytona  # noqa: F401
+        except ImportError:
+            return False
+        return bool(self._api_key(None))
+
+    async def create_session(self, config: dict[str, Any]) -> SandboxSession:
+        try:
+            from daytona import (
+                CreateSandboxFromSnapshotParams,
+                Daytona,
+                DaytonaConfig,
+            )
+        except ImportError as exc:
+            raise SandboxNotConfigured(
+                "The 'daytona' provider needs the daytona package (pip install daytona). "
+                "See README ('Adding a sandbox provider')."
+            ) from exc
+        api_key = self._api_key(config)
+        if not api_key:
+            raise SandboxNotConfigured(
+                "Daytona API key missing: set the DAYTONA_API_KEY env var or pass "
+                "'api_key' in the provider config."
+            )
+        snapshot = (config or {}).get("snapshot")
+        timeout = (config or {}).get("timeout") or 300
+        params = (
+            CreateSandboxFromSnapshotParams(snapshot=snapshot) if snapshot else None
+        )
+
+        def _create() -> Any:
+            client = Daytona(DaytonaConfig(api_key=api_key))
+            return client.create(params, timeout=timeout)
+
+        try:
+            sandbox = await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxNotConfigured(f"daytona sandbox creation failed: {exc}") from exc
+        return DaytonaSession(sandbox)
+
+
+# ------------------------------------------------- stub for future providers
 class _StubProvider(SandboxProvider):
     env_var: str = ""
     setup_hint: str = ""
@@ -471,23 +641,6 @@ class _StubProvider(SandboxProvider):
             f"The '{self.kind}' sandbox provider is not implemented in this build. "
             f"{self.setup_hint} See README ('Adding a sandbox provider') to plug it in."
         )
-
-
-class DaytonaProvider(_StubProvider):
-    kind = "daytona"
-    name = "Daytona"
-    description = "Cloud sandboxes via Daytona (stub — plug in your DAYTONA_API_KEY)."
-    env_var = "DAYTONA_API_KEY"
-    setup_hint = "Set DAYTONA_API_KEY and implement DaytonaProvider.create_session()."
-
-    def config_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "api_key": {"type": "string", "description": "Daytona API key (or DAYTONA_API_KEY env)."},
-                "snapshot": {"type": "string", "description": "Daytona snapshot/image."},
-            },
-        }
 
 
 class ModalProvider(_StubProvider):

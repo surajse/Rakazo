@@ -91,11 +91,22 @@ class SandboxIn(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
+class SandboxPatch(BaseModel):
+    """Owner-only updates: rename and/or toggle team sharing."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    shared: bool | None = None
+
+
 class SandboxOut(BaseModel):
     id: str
     name: str
     kind: str
     config: dict
+    shared: bool
+    is_owner: bool
+    owner_name: str | None = None
+    owner_email: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -122,6 +133,8 @@ class BotIn(BaseModel):
     routines_md: str | None = None
     # MCP tool servers; see Bot.mcp_servers for the config schema.
     mcp_servers: list[dict[str, Any]] | None = None
+    # OpenAPI tool specs; see Bot.openapi_specs for the config schema.
+    openapi_specs: list[dict[str, Any]] | None = None
 
 
 class BotPatch(BaseModel):
@@ -133,6 +146,7 @@ class BotPatch(BaseModel):
     routines_md: str | None = None
     status: Literal["active", "archived"] | None = None
     mcp_servers: list[dict[str, Any]] | None = None
+    openapi_specs: list[dict[str, Any]] | None = None
 
 
 class BotOut(BaseModel):
@@ -146,6 +160,7 @@ class BotOut(BaseModel):
     parent_bot_id: str | None
     status: str
     mcp_servers: list[dict[str, Any]] | None = None
+    openapi_specs: list[dict[str, Any]] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

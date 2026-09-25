@@ -75,6 +75,10 @@ class Sandbox(Base):
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(50))  # local_docker | e2b | daytona | modal
     config: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Team sharing. Deliberate simplification: all authenticated users are
+    # "the team" (no org/team model). A shared sandbox is readable/usable by
+    # everyone, but only its owner may edit, delete, or change sharing.
+    shared: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -108,6 +112,11 @@ class Bot(Base):
     #  "command": str, "args": [str], "env": {str: str},   # stdio
     #  "url": str, "headers": {str: str}}                  # http
     mcp_servers: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # OpenAPI tool specs for this bot: list of
+    # {"name": str, "spec_url": str, "base_url": str (optional override),
+    #  "auth": {"type": "header"|"query"|"bearer", "name": str, "value": str}
+    #   | "api_key_string" (Bearer header shorthand)}
+    openapi_specs: Mapped[list | None] = mapped_column(JSON, nullable=True)
     parent_bot_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("bots.id", ondelete="SET NULL"), nullable=True
     )
