@@ -1,6 +1,6 @@
 # Rakazo Desktop
 
-Native companion app for [Rakazo](https://github.com/rakazo/rakazo) — the self-hosted AI bot platform.
+Native companion app for [Rakazo](https://github.com/surajse/Rakazo) — the self-hosted AI bot platform.
 It is a **menubar/tray companion**, not a wrapped website: it lives in your system tray, summons a
 compact quick-chat popup anywhere with a global hotkey, and shows native OS notifications when a bot
 needs approval or finishes a run.
